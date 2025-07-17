@@ -1,0 +1,162 @@
+version: '3.8'
+
+networks:
+  korpor-network:
+    driver: bridge
+
+volumes:
+  mysql-data:
+  node_modules_backend:
+  node_modules_backoffice:
+  node_modules_mobile:
+
+services:
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: korpor-mysql
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: korpor_dev
+      MYSQL_USER: ${MYSQL_USER:-korpor_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-korpor_password}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./AI/chatbot\ backoffic/inject_data.sql:/docker-entrypoint-initdb.d/inject_data.sql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - korpor-network
+
+  # AI Flask Service (port 5001)
+  ai-service:
+    build:
+      context: ./AI
+      dockerfile: Dockerfile
+    container_name: korpor-ai-service
+    ports:
+      - "5001:5001"
+    environment:
+      - FLASK_PORT=5001
+      - FLASK_ENV=development
+      - DB_HOST=mysql
+      - DB_NAME=korpor_dev
+      - DB_USER=${MYSQL_USER:-korpor_user}
+      - DB_PASSWORD=${MYSQL_PASSWORD:-korpor_password}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    volumes:
+      - ./AI:/app
+      - ./AI/chatbot/chroma_db_en:/app/chatbot/chroma_db_en
+      - ./AI/chatbot/chroma_db_ar:/app/chatbot/chroma_db_ar
+      - ./AI/chatbot/chroma_db_fr:/app/chatbot/chroma_db_fr
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - korpor-network
+
+  # Backend Service (port 5000)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: korpor-backend
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=development
+      - DB_HOST=mysql
+      - DB_NAME=korpor_dev
+      - DB_USER=${MYSQL_USER:-korpor_user}
+      - DB_PASSWORD=${MYSQL_PASSWORD:-korpor_password}
+      - AI_SERVICE_URL=http://ai-service:5001
+      - JWT_SECRET=${JWT_SECRET:-your-jwt-secret}
+    volumes:
+      - ./backend:/app
+      - node_modules_backend:/app/node_modules
+    depends_on:
+      mysql:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - korpor-network
+
+  # Front-Backoffice (port 5173)
+  front-backoffice:
+    build:
+      context: ./front-backoffice
+      dockerfile: Dockerfile
+      target: development
+    container_name: korpor-backoffice
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_HOST=0.0.0.0
+      - VITE_BACKEND_URL=http://localhost:5000
+      - VITE_AI_SERVICE_URL=http://localhost:5001
+    volumes:
+      - ./front-backoffice:/app
+      - node_modules_backoffice:/app/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5173/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - korpor-network
+
+  # Front-Mobile (Expo)
+  front-mobile:
+    build:
+      context: ./front-mobile
+      dockerfile: Dockerfile
+    container_name: korpor-mobile
+    ports:
+      - "19000:19000"  # Expo DevTools
+      - "19001:19001"  # Expo Development Server
+      - "19002:19002"  # Expo Development Server (additional)
+      - "8081:8081"    # Metro bundler
+    environment:
+      - EXPO_DEVTOOLS_LISTEN_ADDRESS=0.0.0.0
+      - REACT_NATIVE_PACKAGER_HOSTNAME=0.0.0.0
+      - EXPO_NO_TELEMETRY=1
+    volumes:
+      - ./front-mobile:/app
+      - node_modules_mobile:/app/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - korpor-network
+    tty: true
+    stdin_open: true
+

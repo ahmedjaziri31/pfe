@@ -1,0 +1,34 @@
+/node_modules
+/.pnp
+.pnp.js
+/.env
+/AI/
+# testing
+/coverage
+.wakatime-project
+
+# production
+/build
+
+*.pkl
+
+
+
+# misc
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Ignore image files in companyUpload/logos and companyUpload/banners
+/companyUpload/logos/*
+/companyUpload/banners/*
+
+# Allow tracking of the folders themselves
+!/companyUpload/logos/.gitkeep
+!/companyUpload/banners/.gitkeep
